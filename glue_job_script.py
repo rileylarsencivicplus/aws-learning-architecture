@@ -14,12 +14,14 @@ def run_glue_job():
     
     # --- Configuration ---
     # Updated based on user feedback to match their environment
-    WORKGROUP_NAME = 'default' 
-    DATABASE_NAME = 'default-namespace' # Often the database name matches the namespace in Serverless
+    REGION = 'us-east-1'
+    WORKGROUP_NAME = 'default-workgroup' 
+    DATABASE_NAME = 'dev' 
     TABLE_NAME = 'public.music_streams'
     
     # --- Redshift Data API Client ---
-    client = boto3.client('redshift-data')
+    # We explicitly define the region to avoid "Endpoint doesn't exist" errors if Glue runs in a different region
+    client = boto3.client('redshift-data', region_name=REGION)
 
     def execute_query(sql, description):
         print(f"--- {description} ---")
