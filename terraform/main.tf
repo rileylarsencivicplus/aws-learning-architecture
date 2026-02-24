@@ -1,14 +1,14 @@
 terraform {
-  required_version = ">= 1.5"
+  required_version = ">= 1.14.5"
 
   required_providers {
     aws = {
       source  = "hashicorp/aws"
-      version = "~> 5.0"
+      version = ">= 5.100.0" # 5.84+ required for Glue 5.0 / python_version "3.11" support
     }
     random = {
       source  = "hashicorp/random"
-      version = "~> 3.0"
+      version = ">= 3.8.1"
     }
   }
 
@@ -22,8 +22,8 @@ provider "aws" {
 
   default_tags {
     tags = {
-      Project     = var.project_name
-      ManagedBy   = "Terraform"
+      Project   = var.project_name
+      ManagedBy = "Terraform"
     }
   }
 }

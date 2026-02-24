@@ -1,0 +1,66 @@
+﻿{
+    "events": [
+        {
+            "timestamp": 1771963845980,
+            "message": "Traceback (most recent call last):\n  File \"/tmp/runscript.py\", line 213, in <module>\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963845981,
+            "message": "    runpy.run_path(job_script_path, run_name='__main__')\n  File \"/.pyenv/versions/3.9.10/lib/python3.9/runpy.py\", line 268, in run_path\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846017,
+            "message": "    return _run_module_code(code, init_globals, run_name,\n  File \"/.pyenv/versions/3.9.10/lib/python3.9/runpy.py\", line 97, in _run_module_code\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846017,
+            "message": "    _run_code(code, mod_globals, init_globals,\n  File \"/.pyenv/versions/3.9.10/lib/python3.9/runpy.py\", line 87, in _run_code\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846017,
+            "message": "    exec(code, run_globals)\n  File \"/tmp/glue-python-scripts-wjPh/glue_job_script.py\", line 118, in <module>\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846018,
+            "message": "  File \"/tmp/glue-python-scripts-wjPh/glue_job_script.py\", line 84, in run_glue_job\n  File \"/tmp/glue-python-scripts-wjPh/glue_job_script.py\", line 60, in execute_query\n  File \"/.pyenv/versions/python39_loaded/lib/python3.9/site-packages/botocore/client.py\", line 395, in _api_call\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846051,
+            "message": "    return self._make_api_call(operation_name, kwargs)\n  File \"/.pyenv/versions/python39_loaded/lib/python3.9/site-packages/botocore/client.py\", line 695, in _make_api_call\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846052,
+            "message": "    request_dict = self._convert_to_request_dict(\n  File \"/.pyenv/versions/python39_loaded/lib/python3.9/site-packages/botocore/client.py\", line 745, in _convert_to_request_dict\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846052,
+            "message": "    request_dict = self._serializer.serialize_to_request(\n  File \"/.pyenv/versions/python39_loaded/lib/python3.9/site-packages/botocore/validate.py\", line 360, in serialize_to_request\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846052,
+            "message": "    raise ParamValidationError(report=report.generate_report())\nbotocore.exceptions.ParamValidationError: Parameter validation failed:\nUnknown parameter in input: \"WorkgroupName\", must be one of: ClusterIdentifier, Database, DbUser, Parameters, SecretArn, Sql, StatementName, WithEvent\n\nDuring handling of the above exception, another exception occurred:\n\nTraceback (most recent call last):\n  File \"/tmp/runscript.py\", line 215, in <module>\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846052,
+            "message": "    handle_errors()\n  File \"/tmp/runscript.py\", line 38, in handle_errors\n",
+            "ingestionTime": 1771963846870
+        },
+        {
+            "timestamp": 1771963846052,
+            "message": "    raise e_type(e_value).with_traceback(new_stack)\nTypeError: __init__() takes 1 positional argument but 2 were given\n",
+            "ingestionTime": 1771963846870
+        }
+    ],
+    "nextForwardToken": "f/39516114231813995283117998946039343103873948518314934283/s",
+    "nextBackwardToken": "b/39516114230208341628823794079848771388243266489884344320/s"
+}
