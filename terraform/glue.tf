@@ -14,7 +14,7 @@ resource "aws_glue_job" "music_stream_insert" {
     # The alternative "glueetl" would be for Spark/big-data processing.
     # python_version "3.9" is required for Glue 4.0 Python Shell jobs.
     name            = "pythonshell"
-    python_version  = "3.9"
+    python_version  = "3.11"
     script_location = "s3://${aws_s3_bucket.glue_assets.bucket}/${aws_s3_object.glue_script.key}"
   }
 
@@ -35,6 +35,7 @@ resource "aws_glue_job" "music_stream_insert" {
   }
 
   # Glue version 3.0 = latest stable Python Shell runtime
+  # NOTE: pythonshell is NOT supported in Glue 4.0+. Must stay at 3.0.
   glue_version = "5.0"
 
   # Max capacity in DPUs. 0.0625 is the minimum for Python Shell (cheapest).
