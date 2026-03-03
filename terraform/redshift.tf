@@ -24,8 +24,9 @@ resource "aws_redshiftserverless_workgroup" "main" {
   workgroup_name = "default-workgroup"
   namespace_name = data.aws_redshiftserverless_namespace.main.namespace_name
 
-  config {
-    price_performance_target = 50  # Balanced pricing model
+  price_performance_target {
+     level = 50
+     enabled = true
   }
 
   tags = {
