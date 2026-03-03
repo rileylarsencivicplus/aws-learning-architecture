@@ -14,3 +14,24 @@ data "aws_redshiftserverless_namespace" "main" {
 data "aws_redshiftserverless_workgroup" "main" {
   workgroup_name = "default-workgroup"
 }
+
+# ─────────────────────────────────────────────
+# RESOURCE — manage Redshift Serverless workgroup
+# with explicit pricing model configuration
+# ─────────────────────────────────────────────
+
+resource "aws_redshiftserverless_workgroup" "main" {
+  workgroup_name = "default-workgroup"
+  namespace_name = data.aws_redshiftserverless_namespace.main.namespace_name
+
+  price_performance_target {
+     level = 50
+     enabled = true
+  }
+
+  tags = {
+    Project   = var.project_name
+    ManagedBy = "Terraform"
+  }
+}
+
