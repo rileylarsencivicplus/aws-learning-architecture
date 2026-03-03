@@ -1,11 +1,11 @@
 output "redshift_workgroup_endpoint" {
   description = "Hostname:port endpoint for the Redshift Serverless workgroup."
-  value       = "${data.aws_redshiftserverless_workgroup.main.endpoint[0].address}:${data.aws_redshiftserverless_workgroup.main.endpoint[0].port}"
+  value       = "${aws_redshiftserverless_workgroup.main.endpoint[0].address}:${aws_redshiftserverless_workgroup.main.endpoint[0].port}"
 }
 
 output "redshift_namespace_id" {
   description = "ID of the Redshift Serverless namespace."
-  value       = data.aws_redshiftserverless_namespace.main.id
+  value       = aws_redshiftserverless_namespace.main.id
 }
 
 output "s3_bucket_name" {

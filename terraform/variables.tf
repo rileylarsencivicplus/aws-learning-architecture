@@ -11,7 +11,14 @@ variable "project_name" {
 }
 
 variable "redshift_database_name" {
-  description = "The database inside the existing Redshift Serverless namespace to run queries against."
+  description = "The name of the database Terraform will create inside the Redshift Serverless namespace."
   type        = string
   default     = "dev"
+}
+
+variable "redshift_admin_password" {
+  description = "Admin password for the Redshift Serverless namespace. Must be 8-64 chars, contain uppercase, lowercase, and a digit."
+  type        = string
+  sensitive   = true
+  # Do NOT set a default here — supply via terraform.tfvars or the -var flag.
 }

@@ -22,7 +22,7 @@ resource "aws_glue_job" "music_stream_insert" {
   # The script reads them via getResolvedOptions() so you can change
   # these values here in Terraform without editing the Python file.
   default_arguments = {
-    "--WORKGROUP_NAME"      = data.aws_redshiftserverless_workgroup.main.workgroup_name
+    "--WORKGROUP_NAME"      = aws_redshiftserverless_workgroup.main.workgroup_name
     "--DATABASE_NAME"       = var.redshift_database_name
     "--REGION"              = var.aws_region
     "--job-language"        = "python"
