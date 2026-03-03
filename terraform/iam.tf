@@ -77,7 +77,7 @@ resource "aws_iam_role_policy" "glue_redshift_s3_policy" {
           "redshift-serverless:GetCredentials",
           "redshift-serverless:GetWorkgroup"
         ]
-        Resource = data.aws_redshiftserverless_workgroup.main.arn
+        Resource = aws_redshiftserverless_workgroup.main.arn
       }
     ]
   })
