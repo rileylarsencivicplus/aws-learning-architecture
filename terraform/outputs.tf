@@ -27,3 +27,9 @@ output "glue_job_role_arn" {
   description = "ARN of the IAM role attached to the Glue job."
   value       = aws_iam_role.glue_job_role.arn
 }
+
+output "mwaa_webserver_url" {
+  description = "URL of the Airflow web UI — open this after terraform apply to manage and trigger DAGs."
+  value       = "https://${aws_mwaa_environment.main.webserver_url}"
+}
+

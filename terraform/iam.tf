@@ -82,3 +82,112 @@ resource "aws_iam_role_policy" "glue_redshift_s3_policy" {
     ]
   })
 }
+
+# ─────────────────────────────────────────────
+# IAM Role — MWAA Execution Role
+#
+# This role is assumed by the MWAA environment itself.
+# The trust policy allows both airflow service principals
+# (one for the environment, one for individual DAG tasks).
+# ─────────────────────────────────────────────
+
+resource "aws_iam_role" "mwaa_execution_role" {
+  name = "${var.project_name}-mwaa-execution-role"
+
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      {
+        Effect = "Allow"
+        Principal = {
+          Service = [
+            "airflow.amazonaws.com",
+            "airflow-env.amazonaws.com"
+          ]
+        }
+        Action = "sts:AssumeRole"
+      }
+    ]
+  })
+}
+
+# ─────────────────────────────────────────────
+# Inline Policy — MWAA Permissions
+#
+# Grants the MWAA role exactly what it needs:
+#   - S3: read DAGs and write logs to the MWAA bucket
+#   - Glue: start and monitor the music-stream-insert job
+#   - CloudWatch Logs: publish task and scheduler logs
+#   - MWAA: publish environment metrics
+# ─────────────────────────────────────────────
+
+resource "aws_iam_role_policy" "mwaa_execution_policy" {
+  name = "MWAAExecutionPolicy"
+  role = aws_iam_role.mwaa_execution_role.id
+
+  policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [
+      # MWAA reads DAG files and writes logs to its dedicated S3 bucket
+      {
+        Sid    = "MWAABucketAccess"
+        Effect = "Allow"
+        Action = [
+          "s3:GetObject",
+          "s3:GetObjectVersion",
+          "s3:PutObject",
+          "s3:ListBucket",
+          "s3:GetBucketLocation",
+          "s3:GetBucketVersioning",
+          "s3:ListBucketVersions",
+        ]
+        Resource = [
+          aws_s3_bucket.mwaa_dags.arn,
+          "${aws_s3_bucket.mwaa_dags.arn}/*"
+        ]
+      },
+      # Allow the DAG to start and monitor the Glue job
+      {
+        Sid    = "GlueJobAccess"
+        Effect = "Allow"
+        Action = [
+          "glue:StartJobRun",
+          "glue:GetJobRun",
+          "glue:GetJobRuns",
+          "glue:BatchStopJobRun"
+        ]
+        Resource = aws_glue_job.music_stream_insert.arn
+      },
+      # MWAA publishes task, scheduler, and webserver logs to CloudWatch
+      {
+        Sid    = "CloudWatchLogs"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogGroup",
+          "logs:CreateLogStream",
+          "logs:PutLogEvents",
+          "logs:GetLogEvents",
+          "logs:GetLogRecord",
+          "logs:GetQueryResults",
+          "logs:DescribeLogGroups"
+        ]
+        Resource = "arn:aws:logs:${var.aws_region}:*:log-group:airflow-${var.project_name}-airflow-*"
+      },
+      # Required for MWAA to report environment health metrics
+      {
+        Sid      = "CloudWatchMetrics"
+        Effect   = "Allow"
+        Action   = ["cloudwatch:PutMetricData"]
+        Resource = "*"
+      },
+      # Required for MWAA to publish its own internal metrics
+      {
+        Sid      = "MWAAPublishMetrics"
+        Effect   = "Allow"
+        Action   = ["airflow:PublishMetrics"]
+        Resource = "arn:aws:airflow:${var.aws_region}:*:environment/${var.project_name}-airflow"
+      }
+    ]
+  })
+}
+

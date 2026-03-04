@@ -1,11 +1,15 @@
 # aws-learning-architecture
 
-This project uses **Terraform** to provision an AWS data pipeline consisting of:
+A learning project that uses **Terraform** to provision a full AWS data pipeline. Infrastructure is defined as code so it can be spun up, experimented with, and torn down repeatably with simple CLI commands.
 
-- **Redshift Serverless** — data warehouse (namespace + workgroup)
-- **S3** — stores the Glue Python script
-- **AWS Glue** — runs the Python ETL job that inserts a row into Redshift
-- **IAM** — role + permissions wiring everything together
+### What gets built
+
+- **VPC** — isolated network with public/private subnets required by MWAA
+- **Redshift Serverless** — data warehouse that stores music streaming rows
+- **S3** — two buckets: one for Glue scripts, one for Airflow DAGs
+- **AWS Glue** — Python job that inserts one row of music stream data into Redshift
+- **Amazon MWAA** — managed Airflow (`mw1.small`) that schedules the Glue job weekly
+- **IAM** — least-privilege roles and policies wiring every service together
 
 ---
 
@@ -13,23 +17,144 @@ This project uses **Terraform** to provision an AWS data pipeline consisting of:
 
 ```
 aws-learning-architecture/
-├── glue_job_script.py        # Glue Python script (auto-uploaded to S3 by Terraform)
+├── glue_job_script.py          # Glue Python script (auto-uploaded to S3 by Terraform)
+├── dags/
+│   └── music_stream_dag.py     # Airflow DAG (auto-uploaded to S3 by Terraform)
 ├── terraform/
-│   ├── main.tf               # Provider + backend config
-│   ├── variables.tf          # Input variables
-│   ├── outputs.tf            # Summary printed after terraform apply
-│   ├── s3.tf                 # S3 bucket for Glue scripts
-│   ├── iam.tf                # IAM role + permissions for Glue
-│   ├── redshift.tf           # Redshift Serverless namespace + workgroup
-│   └── glue.tf               # Glue job definition
+│   ├── main.tf                 # Terraform + AWS provider config
+│   ├── variables.tf            # All input variables (region, project name, passwords)
+│   ├── outputs.tf              # Values printed after terraform apply
+│   ├── vpc.tf                  # VPC, subnets, NAT gateway (required by MWAA)
+│   ├── s3.tf                   # S3 bucket for Glue scripts
+│   ├── iam.tf                  # IAM roles and policies for Glue and MWAA
+│   ├── redshift.tf             # Redshift Serverless namespace + workgroup
+│   ├── glue.tf                 # Glue job definition
+│   └── mwaa.tf                 # MWAA environment + DAG S3 bucket
 └── README.md
 ```
 
 ---
 
+## Terraform Files
+
+### `main.tf` — Provider & Backend
+
+Declares the minimum Terraform version, the AWS provider version, and the AWS region. Sets up the local state backend (state is stored in `terraform.tfstate` on disk). This is the entry point Terraform reads first on every `init` and `plan`.
+
+---
+
+### `variables.tf` — Input Variables
+
+Defines every configurable input the rest of the codebase references via `var.*`. Nothing gets hardcoded in resource files — values flow in from here.
+
+| Variable                  | Default             | Purpose                                                 |
+| ------------------------- | ------------------- | ------------------------------------------------------- |
+| `aws_region`              | `us-east-1`         | Region all resources deploy into                        |
+| `project_name`            | `aws-learning`      | Prefix applied to every resource name                   |
+| `redshift_database_name`  | `dev`               | Name of the database created inside the namespace       |
+| `redshift_admin_password` | _(none — prompted)_ | Admin credentials for Redshift; sensitive, never logged |
+
+---
+
+### `outputs.tf` — Post-Apply Summary
+
+Values that Terraform prints to the terminal after a successful `apply`. Useful for copy-pasting endpoints and URLs without having to look them up in the AWS Console.
+
+| Output                        | What it shows                                |
+| ----------------------------- | -------------------------------------------- |
+| `redshift_workgroup_endpoint` | `host:port` for connecting to Redshift       |
+| `redshift_namespace_id`       | ID of the Redshift namespace                 |
+| `s3_bucket_name`              | Name of the Glue assets bucket               |
+| `s3_script_path`              | Full `s3://` URI of the uploaded Glue script |
+| `glue_job_name`               | Job name to find in the Glue console         |
+| `glue_job_role_arn`           | ARN of the Glue IAM role                     |
+| `mwaa_webserver_url`          | HTTPS link to the Airflow web UI             |
+
+---
+
+### `vpc.tf` — Networking (Required by MWAA)
+
+Provisions the VPC that Amazon MWAA must run inside. MWAA requires at least two private subnets in different Availability Zones so that its components can be distributed for high availability. Private subnets have no direct internet route — they reach the internet (e.g. for downloading Python packages) through a NAT Gateway sitting in a public subnet.
+
+**Resources created:**
+
+- `aws_vpc` — `10.0.0.0/16` address space, DNS enabled
+- `aws_subnet` × 2 private — `us-east-1a` and `us-east-1b`, for MWAA workers
+- `aws_subnet` × 2 public — same AZs, used only to host the NAT Gateway
+- `aws_internet_gateway` — gives the public subnets a route to the internet
+- `aws_eip` + `aws_nat_gateway` — NAT placed in `us-east-1a` public subnet
+- `aws_route_table` × 2 + associations — private routes via NAT, public routes via IGW
+
+---
+
+### `s3.tf` — Glue Assets Bucket
+
+Creates a private, versioned, encrypted S3 bucket that Glue uses to read the Python script at job runtime. Terraform uploads `glue_job_script.py` to `scripts/` inside this bucket and recalculates the upload whenever the file content changes (`etag` check).
+
+**Why separate from the MWAA bucket?** — MWAA requires its own dedicated bucket; the two cannot share one.
+
+---
+
+### `iam.tf` — Roles & Policies
+
+All IAM configuration lives here in one place so permissions are easy to audit. Two roles exist:
+
+**Glue job role** (`aws-learning-glue-job-role`)
+
+- Trust: `glue.amazonaws.com`
+- Attached managed policy: `AWSGlueServiceRole` (basic Glue startup permissions)
+- Inline policy: S3 read on the Glue bucket, Redshift Data API execution, Redshift Serverless credential retrieval
+
+**MWAA execution role** (`aws-learning-mwaa-execution-role`)
+
+- Trust: `airflow.amazonaws.com` + `airflow-env.amazonaws.com`
+- Inline policy: S3 read/write on the DAG bucket, `glue:StartJobRun`/`GetJobRun` on the Glue job, CloudWatch log publishing, MWAA metric publishing
+
+---
+
+### `redshift.tf` — Redshift Serverless
+
+Creates the Redshift Serverless **namespace** and **workgroup** from scratch. Using `resource` blocks (not `data` blocks) means Terraform owns the full lifecycle — it will create, update, and destroy them.
+
+- **Namespace** (`default-namespace`) — logical container for databases and users. Setting `db_name = "dev"` causes Redshift to automatically create that database on first provision.
+- **Workgroup** (`default-workgroup`) — the compute layer. Configured with a price-performance target of 50 (balanced cost vs. speed). Depends on the namespace so Terraform always creates them in order.
+
+---
+
+### `glue.tf` — Glue Job Definition
+
+Defines the `music-stream-insert` Python Shell job. Key configuration:
+
+- **Type:** `pythonshell` (plain Python, not Spark — appropriate for a single-row insert)
+- **Glue version:** 5.1 with Python 3.9
+- **Capacity:** `0.0625` DPUs (minimum — cheapest option)
+- **Default arguments:** passes `WORKGROUP_NAME`, `DATABASE_NAME`, and `REGION` into the script as environment variables so the Python file never needs to be edited to change targets
+- **Dependencies:** waits for the S3 script upload and IAM policy to exist before creating the job
+
+---
+
+### `mwaa.tf` — Airflow Environment & DAG Bucket
+
+Provisions everything needed to run Apache Airflow via Amazon MWAA.
+
+**DAG S3 bucket** — A dedicated, versioned, encrypted bucket. MWAA polls the `dags/` prefix in this bucket and picks up new or updated DAG files automatically. Terraform uploads `dags/music_stream_dag.py` here.
+
+**Security group** — Attached to the MWAA environment. Has a self-referential ingress rule (allows Airflow components to talk to each other) and open egress (allows HTTPS traffic out for package downloads).
+
+**MWAA environment** (`aws-learning-airflow`)
+
+- Class: `mw1.small` (~$0.49/hr — smallest and cheapest)
+- Airflow version: 2.10.3
+- Runs inside the two private subnets created in `vpc.tf`
+- Full CloudWatch logging enabled for the scheduler, workers, webserver, task logs, and DAG processor — all visible in the Airflow UI and CloudWatch
+
+> **Cost note:** MWAA charges by the hour regardless of DAG activity. Run `terraform destroy` after each learning session to stop billing.
+
+---
+
 ## Prerequisites
 
-- [Terraform >= 1.5](https://developer.hashicorp.com/terraform/downloads) installed
+- [Terraform >= 1.14](https://developer.hashicorp.com/terraform/downloads) installed
 - AWS credentials configured (via `~/.aws/credentials` or environment variables)
 
 ---
@@ -43,31 +168,28 @@ cd terraform
 # 2. Download providers (one-time setup)
 terraform init
 
-# 3. Preview what will be created (no charges)
-terraform plan -var="redshift_admin_password=YourPassword123!"
+# 3. Preview what will be created (~25 resources)
+terraform plan
 
-# 4. Create all resources in AWS
-terraform apply -var="redshift_admin_password=YourPassword123!"
+# 4. Create all resources — Terraform will prompt for the Redshift admin password
+terraform apply
 ```
 
-After `apply` completes, Terraform prints:
-
-- `redshift_workgroup_endpoint` — your Redshift endpoint
-- `s3_bucket_name` — the bucket holding your Glue script
-- `glue_job_name` — the job name to find in the AWS Console
+MWAA takes approximately **20 minutes** to provision after `apply` completes. Once ready, the `mwaa_webserver_url` output will be clickable.
 
 ---
 
-## Run the Glue Job
+## Use Airflow
 
-1. Go to **AWS Console → AWS Glue → ETL Jobs**
-2. Click **`music-stream-insert`**
-3. Click **Run**
-4. Wait ~60 seconds, then check the Run status
+1. Copy the `mwaa_webserver_url` value from the Terraform output
+2. Open it in a browser and log in with your IAM credentials
+3. Find `music_stream_dag` in the DAG list
+4. Toggle it **on**, then click **Trigger DAG** to run it immediately
+5. Watch the Graph View — the task turns green when the Glue job starts successfully
 
 ---
 
-## Verify the Data
+## Verify the Data in Redshift
 
 1. Go to **AWS Console → Amazon Redshift → Query Editor v2**
 2. Connect to workgroup: `default-workgroup`, database: `dev`
@@ -79,22 +201,36 @@ SELECT * FROM public.music_streams;
 
 ---
 
+## Teardown
+
+```bash
+# In Git Bash — destroys all resources and stops all billing
+terraform destroy
+```
+
+> After destroying, open **AWS Billing → Cost Explorer**, filter by service to see the actual MWAA spend for your session.
+
+---
+
 ## Password Tips
 
-- Must be 8–64 characters
-- Must include at least one uppercase letter, one lowercase letter, and one number
-- You can also set it as an environment variable to avoid typing it each time:
+Redshift admin password requirements:
 
-**Windows Command Prompt:**
+- 8–64 characters
+- At least one uppercase letter, one lowercase letter, and one number
 
-```cmd
-set TF_VAR_redshift_admin_password=YourPassword123!
-terraform apply
-```
+To avoid typing it every time, set it as an environment variable:
 
 **Git Bash:**
 
 ```bash
 export TF_VAR_redshift_admin_password=YourPassword123!
+terraform apply
+```
+
+**Windows Command Prompt:**
+
+```cmd
+set TF_VAR_redshift_admin_password=YourPassword123!
 terraform apply
 ```
