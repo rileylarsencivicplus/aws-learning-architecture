@@ -125,30 +125,104 @@ resource "aws_iam_role_policy" "mwaa_execution_policy" {
   name = "MWAAExecutionPolicy"
   role = aws_iam_role.mwaa_execution_role.id
 
+  # Based on the official AWS sample policy for MWAA environments using
+  # AWS-owned keys: https://docs.aws.amazon.com/mwaa/latest/userguide/mwaa-create-role.html
   policy = jsonencode({
     Version = "2012-10-17"
     Statement = [
-      # MWAA reads DAG files and writes logs to its dedicated S3 bucket
+      # MWAA publishes environment health metrics to CloudWatch
       {
-        Sid    = "MWAABucketAccess"
+        Effect   = "Allow"
+        Action   = "airflow:PublishMetrics"
+        Resource = "arn:aws:airflow:${var.aws_region}:*:environment/${var.project_name}-airflow"
+      },
+      # Explicitly deny listing ALL buckets — MWAA should only see its own DAG bucket
+      {
+        Effect = "Deny"
+        Action = "s3:ListAllMyBuckets"
+        Resource = [
+          aws_s3_bucket.mwaa_dags.arn,
+          "${aws_s3_bucket.mwaa_dags.arn}/*"
+        ]
+      },
+      # Full S3 read access to the DAG bucket (wildcards match all GetBucket* / List* variants
+      # that MWAA's internal validation checks for)
+      {
         Effect = "Allow"
         Action = [
-          "s3:GetObject",
-          "s3:GetObjectVersion",
-          "s3:PutObject",
-          "s3:ListBucket",
-          "s3:GetBucketLocation",
-          "s3:GetBucketVersioning",
-          "s3:ListBucketVersions",
+          "s3:GetObject*",
+          "s3:GetBucket*",
+          "s3:List*"
         ]
         Resource = [
           aws_s3_bucket.mwaa_dags.arn,
           "${aws_s3_bucket.mwaa_dags.arn}/*"
         ]
       },
-      # Allow the DAG to start and monitor the Glue job
+      # Write DAG logs to CloudWatch log groups created by MWAA
       {
-        Sid    = "GlueJobAccess"
+        Effect = "Allow"
+        Action = [
+          "logs:CreateLogStream",
+          "logs:CreateLogGroup",
+          "logs:PutLogEvents",
+          "logs:GetLogEvents",
+          "logs:GetLogRecord",
+          "logs:GetLogGroupFields",
+          "logs:GetQueryResults"
+        ]
+        Resource = "arn:aws:logs:${var.aws_region}:*:log-group:airflow-${var.project_name}-airflow-*"
+      },
+      # DescribeLogGroups needs * — it's an account-level describe call
+      {
+        Effect   = "Allow"
+        Action   = ["logs:DescribeLogGroups"]
+        Resource = "*"
+      },
+      # Account-level S3 public access block check performed during MWAA validation
+      {
+        Effect   = "Allow"
+        Action   = ["s3:GetAccountPublicAccessBlock"]
+        Resource = "*"
+      },
+      # CloudWatch metrics for environment health
+      {
+        Effect   = "Allow"
+        Action   = "cloudwatch:PutMetricData"
+        Resource = "*"
+      },
+      # MWAA uses SQS internally for its Celery worker task queue
+      {
+        Effect = "Allow"
+        Action = [
+          "sqs:ChangeMessageVisibility",
+          "sqs:DeleteMessage",
+          "sqs:GetQueueAttributes",
+          "sqs:GetQueueUrl",
+          "sqs:ReceiveMessage",
+          "sqs:SendMessage"
+        ]
+        Resource = "arn:aws:sqs:${var.aws_region}:*:airflow-celery-*"
+      },
+      # KMS is used to encrypt/decrypt messages on the Celery SQS queue
+      # NotResource scopes this to AWS-managed keys only (not customer keys)
+      {
+        Effect = "Allow"
+        Action = [
+          "kms:Decrypt",
+          "kms:DescribeKey",
+          "kms:GenerateDataKey*",
+          "kms:Encrypt"
+        ]
+        NotResource = "arn:aws:kms:*:*:key/*"
+        Condition = {
+          StringLike = {
+            "kms:ViaService" = ["sqs.${var.aws_region}.amazonaws.com"]
+          }
+        }
+      },
+      # Custom: allow the DAG to trigger and monitor the Glue job
+      {
         Effect = "Allow"
         Action = [
           "glue:StartJobRun",
@@ -157,37 +231,9 @@ resource "aws_iam_role_policy" "mwaa_execution_policy" {
           "glue:BatchStopJobRun"
         ]
         Resource = aws_glue_job.music_stream_insert.arn
-      },
-      # MWAA publishes task, scheduler, and webserver logs to CloudWatch
-      {
-        Sid    = "CloudWatchLogs"
-        Effect = "Allow"
-        Action = [
-          "logs:CreateLogGroup",
-          "logs:CreateLogStream",
-          "logs:PutLogEvents",
-          "logs:GetLogEvents",
-          "logs:GetLogRecord",
-          "logs:GetQueryResults",
-          "logs:DescribeLogGroups"
-        ]
-        Resource = "arn:aws:logs:${var.aws_region}:*:log-group:airflow-${var.project_name}-airflow-*"
-      },
-      # Required for MWAA to report environment health metrics
-      {
-        Sid      = "CloudWatchMetrics"
-        Effect   = "Allow"
-        Action   = ["cloudwatch:PutMetricData"]
-        Resource = "*"
-      },
-      # Required for MWAA to publish its own internal metrics
-      {
-        Sid      = "MWAAPublishMetrics"
-        Effect   = "Allow"
-        Action   = ["airflow:PublishMetrics"]
-        Resource = "arn:aws:airflow:${var.aws_region}:*:environment/${var.project_name}-airflow"
       }
     ]
   })
 }
+
 
