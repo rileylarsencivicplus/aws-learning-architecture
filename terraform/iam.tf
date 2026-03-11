@@ -204,8 +204,9 @@ resource "aws_iam_role_policy" "mwaa_execution_policy" {
         ]
         Resource = "arn:aws:sqs:${var.aws_region}:*:airflow-celery-*"
       },
-      # KMS is used to encrypt/decrypt messages on the Celery SQS queue
-      # NotResource scopes this to AWS-managed keys only (not customer keys)
+      # KMS is used to encrypt/decrypt messages on the Celery SQS queue.
+      # The ViaService condition ensures this only applies to KMS calls
+      # made on behalf of SQS — not any arbitrary KMS usage.
       {
         Effect = "Allow"
         Action = [
@@ -214,7 +215,7 @@ resource "aws_iam_role_policy" "mwaa_execution_policy" {
           "kms:GenerateDataKey*",
           "kms:Encrypt"
         ]
-        NotResource = "arn:aws:kms:*:*:key/*"
+        Resource = "*"
         Condition = {
           StringLike = {
             "kms:ViaService" = ["sqs.${var.aws_region}.amazonaws.com"]

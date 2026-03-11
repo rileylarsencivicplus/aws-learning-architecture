@@ -39,7 +39,7 @@ aws-learning-architecture/
     └── scripts/
         ├── init.ps1            ← Cleans and re-initializes Terraform
         ├── id.ps1              ← Verifies AWS identity (sanity check)
-        └── trigger_dag.sh      ← End-to-end automation: unpause → trigger → poll
+        └── trigger_dag.ps1     ← End-to-end automation: unpause → trigger → poll
 ```
 
 ---
@@ -154,13 +154,13 @@ When the Glue job runs, it assumes this role. The trust policy allows **only the
 
 Assumed by the entire Airflow environment. The trust policy allows both `airflow.amazonaws.com` and `airflow-env.amazonaws.com`.
 
-| Permission                      | Why                                                              |
-| ------------------------------- | ---------------------------------------------------------------- |
-| S3 read on DAG bucket           | MWAA must read DAG files                                         |
-| CloudWatch Logs                 | Every scheduler/worker/task log goes here                        |
-| SQS                             | MWAA uses Celery internally, which uses SQS as its task queue    |
-| KMS                             | Encrypts/decrypts SQS messages (scoped to AWS-managed keys only) |
-| `glue:StartJobRun` + monitoring | Lets the DAG actually call Glue — scoped to exactly one job ARN  |
+| Permission                                                  | Why                                                                                                                                                                                                                                          |
+| ----------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| S3 read on DAG bucket                                       | MWAA must read DAG files                                                                                                                                                                                                                     |
+| CloudWatch Logs                                             | Every scheduler/worker/task log goes here                                                                                                                                                                                                    |
+| SQS                                                         | MWAA uses Celery internally, which uses SQS as its task queue                                                                                                                                                                                |
+| KMS (`Resource = "*"`, scoped via `kms:ViaService = sqs.*`) | Allows MWAA to call `kms:GenerateDataKey` on the SQS-managed KMS key when dispatching tasks to Celery workers. The `ViaService` condition ensures this permission only applies to KMS calls made on behalf of SQS — not arbitrary KMS usage. |
+| `glue:StartJobRun` + monitoring                             | Lets the DAG actually call Glue — scoped to exactly one job ARN                                                                                                                                                                              |
 
 ---
 
@@ -196,14 +196,15 @@ MWAA **cannot share** the Glue assets bucket — it requires its own dedicated S
 
 #### The MWAA Environment
 
-| Setting                 | Value                                      | Why                                                                       |
-| ----------------------- | ------------------------------------------ | ------------------------------------------------------------------------- |
-| `environment_class`     | `mw1.small`                                | Cheapest tier (~$0.49/hr). Suitable for learning.                         |
-| `airflow_version`       | `2.10.3`                                   | Pinned for reproducibility.                                               |
-| `execution_role_arn`    | Points to `mwaa_execution_role`            | The IAM role MWAA assumes for all its operations.                         |
-| `dag_s3_path`           | `dags/`                                    | The S3 prefix MWAA scans for `.py` files.                                 |
-| `network_configuration` | Both private subnets + MWAA security group | Workers live in private subnets with outbound access via NAT.             |
-| `logging_configuration` | All components at INFO                     | Scheduler, worker, task, webserver, and DAG processing logs → CloudWatch. |
+| Setting                 | Value                                      | Why                                                                                                                                                        |
+| ----------------------- | ------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `environment_class`     | `mw1.small`                                | Cheapest tier (~$0.49/hr). Suitable for learning.                                                                                                          |
+| `airflow_version`       | `2.10.3`                                   | Pinned for reproducibility.                                                                                                                                |
+| `webserver_access_mode` | `PUBLIC_NETWORK`                           | Exposes the Airflow UI/CLI API on a public URL so `trigger_dag.ps1` can reach it from outside the VPC. Workers and scheduler still run in private subnets. |
+| `execution_role_arn`    | Points to `mwaa_execution_role`            | The IAM role MWAA assumes for all its operations.                                                                                                          |
+| `dag_s3_path`           | `dags/`                                    | The S3 prefix MWAA scans for `.py` files.                                                                                                                  |
+| `network_configuration` | Both private subnets + MWAA security group | Workers live in private subnets with outbound access via NAT.                                                                                              |
+| `logging_configuration` | All components at INFO                     | Scheduler, worker, task, webserver, and DAG processing logs → CloudWatch.                                                                                  |
 
 > **Critical:** `depends_on` explicitly waits for the DAG file upload, the IAM policy (which references the Glue job ARN), and the NAT Gateway. Without NAT, MWAA provisioning fails — it can't reach AWS APIs from private subnets.
 
@@ -235,12 +236,12 @@ MWAA **cannot share** the Glue assets bucket — it requires its own dedicated S
 
 ### `dags/music_stream_dag.py` — The Airflow Orchestration
 
-| Setting             | Value                  | Why                                                                          |
-| ------------------- | ---------------------- | ---------------------------------------------------------------------------- |
-| `schedule_interval` | `@weekly`              | Every Sunday at 00:00 UTC                                                    |
-| `catchup = False`   | set                    | Prevents Airflow from backfilling all missed weekly runs since `start_date`. |
-| `start_date`        | `datetime(2026, 3, 9)` | First Sunday after the project was created. No runs scheduled before this.   |
-| `retries`           | 1 with 5-min delay     | Retries once on transient API failures before marking the run failed.        |
+| Setting             | Value                  | Why                                                                                                                                                                                                                                                                                                               |
+| ------------------- | ---------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `schedule_interval` | `@weekly`              | Every Sunday at 00:00 UTC                                                                                                                                                                                                                                                                                         |
+| `catchup = False`   | set                    | Prevents Airflow from backfilling all missed weekly runs since `start_date`.                                                                                                                                                                                                                                      |
+| `start_date`        | `datetime(2026, 3, 1)` | Must be **in the past**. Airflow's rule is that it runs on the first interval _after_ `start_date`, not on the date itself. If `start_date` is set to today, no run is eligible until the next weekly boundary. Setting it one or more intervals in the past ensures a manual trigger is immediately schedulable. |
+| `retries`           | 1 with 5-min delay     | Retries once on transient API failures before marking the run failed.                                                                                                                                                                                                                                             |
 
 The single task `trigger_glue_job` uses a `PythonOperator` calling `boto3.client("glue").start_job_run()`. The DAG **fires** the job and logs the `JobRunId` — it does not wait for the job to finish. That polling is handled by `trigger_dag.sh`.
 
@@ -256,7 +257,7 @@ Deletes `.terraform/` and `.terraform.lock.hcl` before running `terraform init`.
 
 Runs `aws sts get-caller-identity` to confirm which AWS account and IAM user Terraform will use. Always run before `apply` to verify you're targeting the right account.
 
-### `terraform/scripts/trigger_dag.sh` — End-to-End Automation
+### `terraform/scripts/trigger_dag.ps1` — End-to-End Automation
 
 ```
 Step 1: Verify MWAA status == AVAILABLE (exit if not ready)
@@ -269,14 +270,16 @@ Step 5: Poll aws glue get-job-runs every 15s (up to 5 minutes)
          NONE → Airflow is still scheduling, keep waiting
 ```
 
-The `airflow_cli()` helper fetches a short-lived (~60s) MWAA CLI bearer token via `aws mwaa create-cli-token`, then POSTs the CLI command to the MWAA webserver's `/aws_mwaa/cli` endpoint. The response is base64-encoded JSON that the inline Python decodes.
+The `Invoke-AirflowCli` helper fetches a short-lived (~60s) MWAA CLI bearer token via `aws mwaa create-cli-token`, then POSTs the CLI command to the MWAA webserver's `/aws_mwaa/cli` endpoint. The response is base64-encoded JSON that PowerShell decodes with `[Convert]::FromBase64String()`.
+
+> **Why PowerShell instead of bash?** The AWS CLI on Windows is installed in the system PATH available to PowerShell. Bash (Git Bash) does not inherit the system PATH, so `aws` is not on its PATH by default. The PowerShell version works out of the box with no extra configuration.
 
 ---
 
 ## The Complete Data Flow (End to End)
 
 ```
-bash terraform/scripts/trigger_dag.sh
+.\terraform\scripts\trigger_dag.ps1
   │
   ├─ aws mwaa create-cli-token → short-lived bearer token
   ├─ POST /aws_mwaa/cli "dags unpause music_stream_dag"
@@ -299,7 +302,7 @@ bash terraform/scripts/trigger_dag.sh
                     │
                     └─ [Redshift Serverless] Row stored in dev.public.music_streams
 
-  trigger_dag.sh polls aws glue get-job-runs → SUCCEEDED → exit 0
+  trigger_dag.ps1 polls aws glue get-job-runs → SUCCEEDED → exit 0
 ```
 
 ---

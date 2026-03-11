@@ -29,7 +29,11 @@ aws-learning-architecture/
 │   ├── iam.tf                  # IAM roles and policies for Glue and MWAA
 │   ├── redshift.tf             # Redshift Serverless namespace + workgroup
 │   ├── glue.tf                 # Glue job definition
-│   └── mwaa.tf                 # MWAA environment + DAG S3 bucket
+│   ├── mwaa.tf                 # MWAA environment + DAG S3 bucket
+│   └── scripts/
+│       ├── init.ps1            # Clean re-initialization helper
+│       ├── id.ps1              # Verify AWS identity before apply
+│       └── trigger_dag.ps1     # Unpause, trigger, and poll the DAG end-to-end
 └── README.md
 ```
 
@@ -179,17 +183,46 @@ MWAA takes approximately **20 minutes** to provision after `apply` completes. On
 
 ---
 
-## Use Airflow
+## Trigger the Pipeline
 
-1. Copy the `mwaa_webserver_url` value from the Terraform output
-2. Open it in a browser and log in with your IAM credentials
-3. Find `music_stream_dag` in the DAG list
-4. Toggle it **on**, then click **Trigger DAG** to run it immediately
-5. Watch the Graph View — the task turns green when the Glue job starts successfully
+Once MWAA shows `AVAILABLE` (check with `aws mwaa get-environment --name aws-learning-airflow --query Environment.Status`), run the automation script from the repo root:
+
+```powershell
+.\terraform\scripts\trigger_dag.ps1
+```
+
+The script will:
+
+1. Confirm the MWAA environment is `AVAILABLE`
+2. Unpause `music_stream_dag` (new DAGs always start paused)
+3. Trigger an immediate manual run
+4. Poll `aws glue get-job-runs` every 15 seconds until the Glue job `SUCCEEDED` or fails
+5. Print the result and remind you to run `terraform destroy`
+
+> **Alternatively** — open the `mwaa_webserver_url` output in your browser to access the Airflow UI and trigger the DAG manually from there.
 
 ---
 
 ## Verify the Data in Redshift
+
+**Option A — AWS CLI (quickest)**
+
+```powershell
+# Submit the query and capture the statement ID
+$id = (aws redshift-data execute-statement `
+    --workgroup-name default-workgroup `
+    --database dev `
+    --sql "SELECT * FROM public.music_streams;" `
+    --profile antigravity-user --region us-east-1 `
+    --query Id --output text)
+
+# Wait a few seconds, then retrieve results
+Start-Sleep -Seconds 4
+aws redshift-data get-statement-result --id $id `
+    --profile antigravity-user --region us-east-1 --output json
+```
+
+**Option B — AWS Console**
 
 1. Go to **AWS Console → Amazon Redshift → Query Editor v2**
 2. Connect to workgroup: `default-workgroup`, database: `dev`

@@ -6,7 +6,7 @@
 
 ```mermaid
 flowchart TB
-    You(["💻 You\ntrigger_dag.sh"])
+    You(["💻 You\ntrigger_dag.ps1"])
 
     subgraph S3["S3 — File Storage"]
         DAGBucket["📁 mwaa-dags bucket\nHolds: music_stream_dag.py"]
@@ -62,20 +62,27 @@ flowchart LR
 
 ## Network: Why There's a VPC
 
-> Airflow (MWAA) is required by AWS to run inside a private network. It cannot reach the internet
-> directly — it goes through a NAT Gateway instead.
+> Airflow (MWAA) is required by AWS to run inside a private network. Its **workers and scheduler**
+> always live in private subnets and reach the internet via a NAT Gateway.
+>
+> The **webserver** is configured with `webserver_access_mode = "PUBLIC_NETWORK"`, which puts a
+> public-facing load balancer in front of the Airflow UI/API — allowing `trigger_dag.ps1` to
+> call the Airflow CLI endpoint from your laptop without VPN access.
 
 ```mermaid
 flowchart LR
+    You(["💻 You\ntrigger_dag.ps1"])
     Internet(["🌐 Internet\nAWS APIs · PyPI"])
 
     subgraph VPC["VPC — Your Private Network"]
         subgraph Private["Private Subnets (no direct internet)"]
-            MWAA["🌀 Airflow Workers\nScheduler · Webserver"]
+            Workers["🌀 Airflow Workers\n& Scheduler"]
         end
         NAT["NAT Gateway\n(controlled exit point)"]
+        WebLB["🌐 Airflow Webserver\n(PUBLIC_NETWORK mode)"]
     end
 
-    MWAA -->|"outbound requests only"| NAT
+    You -->|"HTTPS · Airflow CLI API"| WebLB
+    Workers -->|"outbound requests only"| NAT
     NAT -->|"reaches out on\nAirflow's behalf"| Internet
 ```

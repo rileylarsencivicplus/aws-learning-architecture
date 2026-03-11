@@ -49,7 +49,7 @@ with DAG(
     default_args=default_args,
     description="Triggers the music-stream-insert Glue job once per week.",
     schedule_interval="@weekly",
-    start_date=datetime(2026, 3, 9),  # First Sunday on or after today
+    start_date=datetime(2026, 3, 1),  # Must be in the past; Airflow runs on the first interval *after* start_date
     catchup=False,                    # Do not backfill missed runs
     tags=["glue", "music-stream", "learning"],
 ) as dag:

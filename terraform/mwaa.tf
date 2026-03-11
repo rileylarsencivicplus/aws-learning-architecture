@@ -103,9 +103,10 @@ resource "aws_security_group" "mwaa" {
 # ─────────────────────────────────────────────
 
 resource "aws_mwaa_environment" "main" {
-  name              = "${var.project_name}-airflow"
-  airflow_version   = "2.10.3"
-  environment_class = "mw1.small"
+  name                  = "${var.project_name}-airflow"
+  airflow_version       = "2.10.3"
+  environment_class     = "mw1.small"
+  webserver_access_mode = "PUBLIC_ONLY"
 
   # IAM role that grants MWAA permissions (defined in iam.tf)
   execution_role_arn = aws_iam_role.mwaa_execution_role.arn
